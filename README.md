@@ -43,7 +43,7 @@ If you have Bun installed, you can replace `"npx"` with `"bunx"` for faster star
 ### Option B — Local development
 
 ```bash
-git clone https://github.com/your-username/wallet-mcp.git
+git clone https://github.com/lowwave/wallet-mcp.git
 cd wallet-mcp
 pnpm install
 ```
