@@ -10,37 +10,14 @@ A community-built MCP (Model Context Protocol) server for the [BudgetBakers Wall
 
 ## Installation
 
-### Option A — Claude Desktop (recommended, zero install)
+> [!WARNING]
+> **Do not install this from npm.** The npm package named `wallet-mcp` is an unrelated
+> crypto-wallet project by a different author — it is not this server. Installing it and
+> pasting your BudgetBakers token into its `env` block would hand your API token to
+> third-party code. This project is not published to any registry; run it from a clone,
+> as described below.
 
-1. Get your API token from **Settings > API Tokens** in the [Wallet web app](https://web.budgetbakers.com)
-
-2. Open your Claude Desktop config file:
-   - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-3. Add the `wallet` server — paste your token directly into the `env` block:
-
-```json
-{
-  "mcpServers": {
-    "wallet": {
-      "command": "npx",
-      "args": ["-y", "wallet-mcp"],
-      "env": {
-        "WALLET_API_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
-```
-
-> **Note:** The token must be set in the `env` field of the config — Claude Desktop does not load `.env` files. This config file is local to your machine and is not shared or committed to any repository.
-
-If you have Bun installed, you can replace `"npx"` with `"bunx"` for faster startup.
-
-4. Restart Claude Desktop. You should see the wallet tools appear in the tools menu.
-
-### Option B — Local development
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/lowwave/wallet-mcp.git
@@ -48,13 +25,26 @@ cd wallet-mcp
 pnpm install
 ```
 
-Then add it to your Claude Desktop config pointing to the local source:
+### 2. Get your API token
+
+Generate one from **Settings > API Tokens** in the [Wallet web app](https://web.budgetbakers.com).
+
+### 3. Register the server with your MCP client
+
+#### Claude Desktop
+
+Open your config file:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add the `wallet` server, using absolute paths for both the runtime and the entry point:
 
 ```json
 {
   "mcpServers": {
     "wallet": {
-      "command": "bun",
+      "command": "/absolute/path/to/bun",
       "args": ["run", "/absolute/path/to/wallet-mcp/src/index.ts"],
       "env": {
         "WALLET_API_TOKEN": "your_token_here"
@@ -64,11 +54,66 @@ Then add it to your Claude Desktop config pointing to the local source:
 }
 ```
 
-Or run standalone for manual testing via stdin:
+Then restart Claude Desktop completely (quit the app, not just the window). The wallet
+tools should appear in the tools menu.
+
+> **Absolute path to the runtime matters.** Claude Desktop is launched from the GUI and
+> does not inherit your shell `PATH`, so a bare `"command": "bun"` fails with `ENOENT`
+> when Bun (or Node, under nvm) lives outside the system paths. Run `which bun` and paste
+> the result.
+
+> **The token must live in the `env` block.** Claude Desktop does not read `.env` files.
+> The config file is local to your machine and is not committed to any repository.
+
+#### Claude Code
+
+```bash
+claude mcp add wallet --scope local \
+  --env WALLET_API_TOKEN=your_token_here \
+  -- "$(which bun)" run /absolute/path/to/wallet-mcp/src/index.ts
+```
+
+Verify with `claude mcp list` — the server should report `✔ Connected`.
+
+### Running with Node instead of Bun
+
+Bun is the intended runtime, but the server is plain TypeScript with no Bun-specific APIs.
+To run it on Node, compile first and point the client at the build output:
+
+```bash
+pnpm build
+```
+
+```json
+{
+  "command": "/absolute/path/to/node",
+  "args": ["/absolute/path/to/wallet-mcp/dist/index.js"]
+}
+```
+
+Remember to re-run `pnpm build` after every source change; the Bun setup reads `src/`
+directly and needs no build step.
+
+### Manual testing via stdin
 
 ```bash
 WALLET_API_TOKEN=your_token_here pnpm dev
 ```
+
+You can also drive a full handshake without a client to confirm the server boots and
+registers its tools:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | WALLET_API_TOKEN=your_token_here bun run src/index.ts
+```
+
+Note that `pnpm dev` uses `bun --watch`, which is only useful for this kind of manual
+stdin testing — MCP clients spawn the server fresh per session, so the watcher has no
+effect there.
 
 ## Available tools
 
