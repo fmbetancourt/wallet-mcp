@@ -1,20 +1,39 @@
 import type { AgentHint, ApiResult, ClientError } from "./types/api";
 
-const API_TOKEN = process.env.WALLET_API_TOKEN;
-const API_URL =
-	process.env.WALLET_API_URL || "https://rest.budgetbakers.com/wallet";
+const DEFAULT_API_URL = "https://rest.budgetbakers.com/wallet";
 
-export function validateConfig(): void {
-	if (!API_TOKEN) {
-		console.error(
-			"[wallet-mcp] WALLET_API_TOKEN is not set. Set it in your environment or Claude Desktop config.",
-		);
-		process.exit(1);
-	}
+export interface ClientConfig {
+	token: string | undefined;
+	baseUrl: string;
 }
 
-function buildUrl(path: string, params?: Record<string, unknown>): string {
-	const url = new URL(`${API_URL}${path}`);
+// Resolved per call rather than captured at module load, so the process
+// environment stays the single source of truth and tests can vary it.
+export function getConfig(): ClientConfig {
+	return {
+		token: process.env.WALLET_API_TOKEN,
+		baseUrl: process.env.WALLET_API_URL || DEFAULT_API_URL,
+	};
+}
+
+// Returns the failure instead of exiting: process lifetime belongs to the
+// entry point, and an exiting function cannot be tested.
+export function validateConfig(): ClientError | null {
+	if (!getConfig().token) {
+		return {
+			error: "config_missing",
+			message:
+				"WALLET_API_TOKEN is not set. Set it in your environment or Claude Desktop config.",
+		};
+	}
+	return null;
+}
+
+export function buildUrl(
+	path: string,
+	params?: Record<string, unknown>,
+): string {
+	const url = new URL(`${getConfig().baseUrl}${path}`);
 
 	// Always append agentHints=true
 	url.searchParams.set("agentHints", "true");
@@ -37,7 +56,7 @@ function buildUrl(path: string, params?: Record<string, unknown>): string {
 	return url.toString();
 }
 
-function mapHttpError(status: number): ClientError {
+export function mapHttpError(status: number): ClientError {
 	switch (status) {
 		case 401:
 			return {
@@ -78,7 +97,7 @@ export async function get<T>(
 	try {
 		response = await fetch(url, {
 			headers: {
-				Authorization: `Bearer ${API_TOKEN}`,
+				Authorization: `Bearer ${getConfig().token}`,
 				Accept: "application/json",
 			},
 		});
@@ -96,7 +115,9 @@ export async function get<T>(
 		return { ok: false, error: mapHttpError(response.status) };
 	}
 
-	const body = await response.json();
+	const body = (await response.json()) as T & {
+		agentHints?: AgentHint[] | null;
+	};
 
 	// Extract agentHints from the response if present
 	const hints: AgentHint[] | null = body.agentHints ?? null;

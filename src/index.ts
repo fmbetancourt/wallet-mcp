@@ -19,8 +19,13 @@ import {
 	TopPayeesSchema,
 } from "./types/tools";
 
-// Validate API token before starting
-validateConfig();
+// Validate API token before starting. The client reports the failure; the
+// entry point owns the decision to terminate.
+const configError = validateConfig();
+if (configError) {
+	console.error(`[wallet-mcp] ${configError.message}`);
+	process.exit(1);
+}
 
 const server = new McpServer({
 	name: "wallet-mcp",

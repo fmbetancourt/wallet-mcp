@@ -1,0 +1,6 @@
+[test]
+# Gate 4 of the constitution: at least 80% coverage project-wide.
+# Must be the scalar form. Bun 1.3.13 silently ignores the inline-table form
+# (`coverageThreshold = { line = 0.8 }`), which yields a gate that never fails.
+coverageThreshold = 0.8
+coverageSkipTestFiles = true

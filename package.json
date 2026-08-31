@@ -9,7 +9,10 @@
     "start": "bun dist/index.js",
     "dev": "bun --watch src/index.ts",
     "prepublishOnly": "pnpm run build",
-    "lint": "biome check src"
+    "lint": "biome check src tests",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
   },
   "bin": {
     "wallet-mcp": "dist/index.js"

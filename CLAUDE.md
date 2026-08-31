@@ -29,7 +29,7 @@ Bun resolves imports differently from the classic Node16/NodeNext strategy. The 
 ### Why all HTTP calls go through client.ts
 
 `client.ts` is the single place that talks to the Wallet API. It handles:
-- Authentication (Bearer token from WALLET_API_TOKEN)
+- Authentication (Bearer token from WALLET_API_TOKEN, read per call via `getConfig()`)
 - Appending `agentHints=true` to every request
 - Structured error handling (401, 409, 429, 5xx mapped to typed error objects)
 - Network error wrapping
@@ -56,6 +56,9 @@ pnpm install       # Install dependencies
 pnpm dev           # Run with Bun's file watcher (useful for manual stdin testing)
 pnpm build         # Compile TypeScript to dist/ via tsc
 pnpm lint          # Run Biome linter and formatter checks
+pnpm typecheck     # Type-check src/ and tests/ (tsc -p tsconfig.test.json)
+pnpm test          # Run the bun:test suite
+pnpm test:coverage # Run the suite with the 80% coverage gate enforced
 ```
 
 Note: `pnpm dev` uses `bun --watch` which is useful when testing manually via stdin. Claude Desktop spawns the server fresh per session, so the watcher has no effect there.
@@ -78,6 +81,12 @@ src/
   utils/
     period.ts         # Converts period enum values to ISO date ranges
     pagination.ts     # Auto-paginates until all results collected (for analytics)
+    aggregate.ts      # Pure aggregation over fetched records (no I/O)
+tests/
+  fixtures.ts         # Record/account factories and the global fetch stub
+  client.test.ts      # Config, URL building, error mapping, transport
+  utils/              # period, pagination, aggregate — held at 100%
+  tools/              # Handler orchestration against a stubbed fetch
 ```
 
 ## Adding a new tool

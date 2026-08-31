@@ -1,5 +1,10 @@
 import { get } from "../client";
 import type { Account, WalletRecord } from "../types/api";
+import {
+	aggregateByCategory,
+	rankPayees,
+	summarizeCashflow,
+} from "../utils/aggregate";
 import { fetchAllPages } from "../utils/pagination";
 import type { Period } from "../utils/period";
 import { resolvePeriod } from "../utils/period";
@@ -26,10 +31,21 @@ interface AnalyticsDateArgs {
 	accountId?: string;
 }
 
-function resolveDates(args: AnalyticsDateArgs): {
+type SpendingByCategoryArgs = AnalyticsDateArgs;
+
+type IncomeVsExpenseArgs = AnalyticsDateArgs;
+
+interface TopPayeesArgs extends AnalyticsDateArgs {
+	categoryId?: string;
+	topN?: number;
+}
+
+interface DateRange {
 	dateFrom: string;
 	dateTo: string;
-} {
+}
+
+export function resolveDates(args: AnalyticsDateArgs): DateRange {
 	if (args.period) {
 		return resolvePeriod(args.period);
 	}
@@ -41,6 +57,12 @@ function resolveDates(args: AnalyticsDateArgs): {
 	}
 	// Default to this_month
 	return resolvePeriod("this_month");
+}
+
+function jsonContent(payload: unknown) {
+	return {
+		content: [{ type: "text" as const, text: JSON.stringify(payload) }],
+	};
 }
 
 async function getAccountIds(accountId?: string): Promise<string[]> {
@@ -98,142 +120,44 @@ async function fetchAllRecords(
 
 // --- Tool: get_spending_by_category ---
 
-interface SpendingByCategoryArgs extends AnalyticsDateArgs {}
-
 export async function getSpendingByCategory(args: SpendingByCategoryArgs) {
 	const expenses = await fetchAllRecords(args, "expense");
 
 	if (expenses.length === 0) {
-		return {
-			content: [
-				{
-					type: "text" as const,
-					text: JSON.stringify({
-						categories: [],
-						message: "No expense records found for the given period.",
-					}),
-				},
-			],
-		};
+		return jsonContent({
+			categories: [],
+			message: "No expense records found for the given period.",
+		});
 	}
 
-	// Group by categoryId
-	const grouped = new Map<
-		string,
-		{ categoryName: string; total: number; count: number; currency: string }
-	>();
+	const { categories, totalExpenses, totalTransactions } =
+		aggregateByCategory(expenses);
 
-	for (const r of expenses) {
-		const catId = r.category?.id ?? "uncategorized";
-		const catName = r.category?.name ?? "Uncategorized";
-		const existing = grouped.get(catId);
-		const amount = Math.abs(r.amount.value);
-
-		if (existing) {
-			existing.total += amount;
-			existing.count++;
-		} else {
-			grouped.set(catId, {
-				categoryName: catName,
-				total: amount,
-				count: 1,
-				currency: r.amount.currencyCode,
-			});
-		}
-	}
-
-	const grandTotal = Array.from(grouped.values()).reduce(
-		(sum, g) => sum + g.total,
-		0,
-	);
-
-	const categories = Array.from(grouped.entries())
-		.map(([categoryId, data]) => ({
-			categoryId,
-			categoryName: data.categoryName,
-			total: Math.round(data.total * 100) / 100,
-			currency: data.currency,
-			transactionCount: data.count,
-			percentOfTotal: Math.round((data.total / grandTotal) * 10000) / 100,
-		}))
-		.sort((a, b) => b.total - a.total);
-
-	const { dateFrom, dateTo } = resolveDates(args);
-
-	return {
-		content: [
-			{
-				type: "text" as const,
-				text: JSON.stringify({
-					categories,
-					period: { dateFrom, dateTo },
-					totalExpenses: Math.round(grandTotal * 100) / 100,
-					totalTransactions: expenses.length,
-				}),
-			},
-		],
-	};
+	return jsonContent({
+		categories,
+		period: resolveDates(args),
+		totalExpenses,
+		totalTransactions,
+	});
 }
 
 // --- Tool: get_income_vs_expense_summary ---
 
-interface IncomeVsExpenseArgs extends AnalyticsDateArgs {}
-
 export async function getIncomeVsExpenseSummary(args: IncomeVsExpenseArgs) {
 	const allRecords = await fetchAllRecords(args);
+	const summary = summarizeCashflow(allRecords);
 
-	const incomeRecords = allRecords.filter((r) => r.recordType === "income");
-	const expenseRecords = allRecords.filter((r) => r.recordType === "expense");
-
-	const totalIncome = incomeRecords.reduce(
-		(sum, r) => sum + Math.abs(r.amount.value),
-		0,
-	);
-	const totalExpenses = expenseRecords.reduce(
-		(sum, r) => sum + Math.abs(r.amount.value),
-		0,
-	);
-
-	// Determine primary currency from the most common currency in records
-	const currencyCounts = new Map<string, number>();
-	for (const r of allRecords) {
-		const c = r.amount.currencyCode;
-		currencyCounts.set(c, (currencyCounts.get(c) ?? 0) + 1);
-	}
-	let currency = "USD";
-	let maxCount = 0;
-	for (const [c, count] of currencyCounts) {
-		if (count > maxCount) {
-			currency = c;
-			maxCount = count;
-		}
-	}
-
-	const { dateFrom, dateTo } = resolveDates(args);
-
-	return {
-		content: [
-			{
-				type: "text" as const,
-				text: JSON.stringify({
-					totalIncome: Math.round(totalIncome * 100) / 100,
-					totalExpenses: Math.round(totalExpenses * 100) / 100,
-					netCashflow: Math.round((totalIncome - totalExpenses) * 100) / 100,
-					currency,
-					period: { dateFrom, dateTo },
-					transactionCount: allRecords.length,
-				}),
-			},
-		],
-	};
+	return jsonContent({
+		totalIncome: summary.totalIncome,
+		totalExpenses: summary.totalExpenses,
+		netCashflow: summary.netCashflow,
+		currency: summary.currency,
+		period: resolveDates(args),
+		transactionCount: summary.transactionCount,
+	});
 }
 
 // --- Tool: get_top_payees ---
-
-interface TopPayeesArgs extends AnalyticsDateArgs {
-	categoryId?: string;
-	topN?: number;
-}
 
 export async function getTopPayees(args: TopPayeesArgs) {
 	const expenses = await fetchAllRecords(args, "expense");
@@ -244,64 +168,21 @@ export async function getTopPayees(args: TopPayeesArgs) {
 		: expenses;
 
 	if (filtered.length === 0) {
-		return {
-			content: [
-				{
-					type: "text" as const,
-					text: JSON.stringify({
-						payees: [],
-						message: "No expense records found for the given period.",
-					}),
-				},
-			],
-		};
+		return jsonContent({
+			payees: [],
+			message: "No expense records found for the given period.",
+		});
 	}
 
-	// Group by payee
-	const grouped = new Map<string, { total: number; count: number }>();
-
-	for (const r of filtered) {
-		const payee = r.payee || "(no payee)";
-		const existing = grouped.get(payee);
-		const amount = Math.abs(r.amount.value);
-
-		if (existing) {
-			existing.total += amount;
-			existing.count++;
-		} else {
-			grouped.set(payee, { total: amount, count: 1 });
-		}
-	}
-
-	const grandTotal = Array.from(grouped.values()).reduce(
-		(sum, g) => sum + g.total,
-		0,
+	const { payees, totalExpenses, totalTransactions } = rankPayees(
+		filtered,
+		args.topN ?? 10,
 	);
 
-	const topN = args.topN ?? 10;
-	const payees = Array.from(grouped.entries())
-		.map(([payee, data]) => ({
-			payee,
-			total: Math.round(data.total * 100) / 100,
-			transactionCount: data.count,
-			percentOfTotal: Math.round((data.total / grandTotal) * 10000) / 100,
-		}))
-		.sort((a, b) => b.total - a.total)
-		.slice(0, topN);
-
-	const { dateFrom, dateTo } = resolveDates(args);
-
-	return {
-		content: [
-			{
-				type: "text" as const,
-				text: JSON.stringify({
-					payees,
-					period: { dateFrom, dateTo },
-					totalExpenses: Math.round(grandTotal * 100) / 100,
-					totalTransactions: filtered.length,
-				}),
-			},
-		],
-	};
+	return jsonContent({
+		payees,
+		period: resolveDates(args),
+		totalExpenses,
+		totalTransactions,
+	});
 }
